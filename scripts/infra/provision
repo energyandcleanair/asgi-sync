@@ -51,21 +51,6 @@ ensure_public_bucket_access() {
   add_storage_binding_if_missing "$PUBLIC_BUCKET" "roles/storage.objectViewer" "allUsers"
 }
 
-ensure_api_key_secret_access() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "[dry-run] Would grant ${COMPUTE_SA} secretAccessor on ${API_KEY_SECRET}"
-    return 0
-  fi
-
-  if ! gcloud secrets describe "$API_KEY_SECRET" --project="$GCP_PROJECT" >/dev/null 2>&1; then
-    echo "secret ${API_KEY_SECRET} does not exist in project ${GCP_PROJECT}" >&2
-    exit 1
-  fi
-
-  add_secret_binding_if_missing "$API_KEY_SECRET" "roles/secretmanager.secretAccessor" \
-    "serviceAccount:${COMPUTE_SA}"
-}
-
 run_job_image() {
   printf '%s:%s' "$IMAGE_NAME" "$IMAGE_TAG"
 }
@@ -147,7 +132,6 @@ main() {
   ensure_buckets
   ensure_bucket_iam
   ensure_public_bucket_access
-  ensure_api_key_secret_access
   ensure_run_job
   ensure_scheduler
   log "Provision complete"

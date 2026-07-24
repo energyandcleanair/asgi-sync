@@ -28,31 +28,6 @@ storage_binding_present() {
     --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
 }
 
-secret_binding_present() {
-  local secret="$1"
-  local role="$2"
-  local member="$3"
-
-  gcloud secrets get-iam-policy "$secret" \
-    --project="$GCP_PROJECT" \
-    --flatten="bindings[].members" \
-    --filter="bindings.role:$role AND bindings.members:$member" \
-    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
-}
-
-run_job_binding_present() {
-  local job="$1"
-  local role="$2"
-  local member="$3"
-
-  gcloud run jobs get-iam-policy "$job" \
-    --region="$GCP_REGION" \
-    --project="$GCP_PROJECT" \
-    --flatten="bindings[].members" \
-    --filter="bindings.role:$role AND bindings.members:$member" \
-    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
-}
-
 add_storage_binding_if_missing() {
   local bucket="$1"
   local role="$2"
@@ -70,21 +45,17 @@ add_storage_binding_if_missing() {
     --quiet
 }
 
-add_secret_binding_if_missing() {
-  local secret="$1"
+run_job_binding_present() {
+  local job="$1"
   local role="$2"
   local member="$3"
 
-  if secret_binding_present "$secret" "$role" "$member"; then
-    log "IAM binding already present: $member -> $role on secret $secret"
-    return 0
-  fi
-
-  log "Granting $member -> $role on secret $secret"
-  run gcloud secrets add-iam-policy-binding "$secret" \
-    --member="$member" \
-    --role="$role" \
-    --quiet
+  gcloud run jobs get-iam-policy "$job" \
+    --region="$GCP_REGION" \
+    --project="$GCP_PROJECT" \
+    --flatten="bindings[].members" \
+    --filter="bindings.role:$role AND bindings.members:$member" \
+    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
 }
 
 add_run_job_binding_if_missing() {
