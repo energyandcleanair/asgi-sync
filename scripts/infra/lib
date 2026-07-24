@@ -45,37 +45,6 @@ add_storage_binding_if_missing() {
     --quiet
 }
 
-run_job_binding_present() {
-  local job="$1"
-  local role="$2"
-  local member="$3"
-
-  gcloud run jobs get-iam-policy "$job" \
-    --region="$GCP_REGION" \
-    --project="$GCP_PROJECT" \
-    --flatten="bindings[].members" \
-    --filter="bindings.role:$role AND bindings.members:$member" \
-    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
-}
-
-add_run_job_binding_if_missing() {
-  local job="$1"
-  local role="$2"
-  local member="$3"
-
-  if run_job_binding_present "$job" "$role" "$member"; then
-    log "IAM binding already present: $member -> $role on job $job"
-    return 0
-  fi
-
-  log "Granting $member -> $role on job $job"
-  run gcloud run jobs add-iam-policy-binding "$job" \
-    --region="$GCP_REGION" \
-    --member="$member" \
-    --role="$role" \
-    --quiet
-}
-
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -95,8 +95,6 @@ scheduler_run_uri() {
 }
 
 ensure_scheduler() {
-  add_run_job_binding_if_missing "$RUN_JOB_NAME" "roles/run.invoker" "serviceAccount:${COMPUTE_SA}"
-
   local uri
   uri="$(scheduler_run_uri)"
 
