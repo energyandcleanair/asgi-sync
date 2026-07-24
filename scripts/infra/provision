@@ -70,6 +70,7 @@ ensure_run_job() {
       --service-account="$COMPUTE_SA" \
       --set-env-vars="AGSI_ARTIFACTS_STORAGE_URL=${artifacts_url},AGSI_PUBLIC_STORAGE_URL=${public_url}" \
       --set-secrets="AGSI_API_KEY=${API_KEY_SECRET}:latest" \
+      --task-timeout="$TASK_TIMEOUT" \
       --command="agsi" \
       --args="sync" \
       --quiet
@@ -84,6 +85,7 @@ ensure_run_job() {
     --service-account="$COMPUTE_SA" \
     --set-env-vars="AGSI_ARTIFACTS_STORAGE_URL=${artifacts_url},AGSI_PUBLIC_STORAGE_URL=${public_url}" \
     --set-secrets="AGSI_API_KEY=${API_KEY_SECRET}:latest" \
+    --task-timeout="$TASK_TIMEOUT" \
     --command="agsi" \
     --args="sync" \
     --quiet

@@ -14,7 +14,8 @@ def policy_file(tmp_path: Path) -> Path:
         'request_version = 1\n'
         'history_start_date = "2011-01-01"\n'
         'recent_days = 30\n'
-        'reconciliation_interval_days = 31\n',
+        'reconciliation_interval_days = 31\n'
+        'reconciliation_resume_days = 3\n',
         encoding="utf-8",
     )
     return path

@@ -21,6 +21,7 @@ class SyncPolicy:
     history_start_date: date
     recent_days: int
     reconciliation_interval_days: int
+    reconciliation_resume_days: int
 
     @property
     def reconciliation_interval(self) -> timedelta:
@@ -36,6 +37,7 @@ def load_sync_policy(path: Path | None = None) -> SyncPolicy:
         history_start_date=date.fromisoformat(str(data["history_start_date"])),
         recent_days=int(data["recent_days"]),
         reconciliation_interval_days=int(data["reconciliation_interval_days"]),
+        reconciliation_resume_days=int(data["reconciliation_resume_days"]),
     )
 
 

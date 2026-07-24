@@ -33,7 +33,8 @@ def integration_policy(tmp_path: Path, cassette_manifest: dict[str, object]) -> 
         f"request_version = 1\n"
         f'history_start_date = "2011-01-01"\n'
         f"recent_days = {recent_days}\n"
-        f"reconciliation_interval_days = 31\n",
+        f"reconciliation_interval_days = 31\n"
+        f"reconciliation_resume_days = 3\n",
         encoding="utf-8",
     )
     return path

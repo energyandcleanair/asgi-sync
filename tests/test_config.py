@@ -13,6 +13,7 @@ def test_load_sync_policy(policy_file: Path) -> None:
     assert policy.history_start_date == date(2011, 1, 1)
     assert policy.recent_days == 30
     assert policy.reconciliation_interval_days == 31
+    assert policy.reconciliation_resume_days == 3
 
 
 def test_settings_defaults(monkeypatch) -> None:

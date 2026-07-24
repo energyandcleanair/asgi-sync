@@ -29,6 +29,7 @@ def _policy_path(policy_file: Path | None) -> Path | None:
 @app.command()
 def sync(
     reconcile: bool = typer.Option(False, "--reconcile", help="Force full reconciliation"),
+    force: bool = typer.Option(False, "--force", help="Re-fetch all days regardless of recent snapshots"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
     latest_gas_day_value: str | None = typer.Option(
         None, "--latest-gas-day", help="Override latest gas day (YYYY-MM-DD)"
@@ -46,6 +47,7 @@ def sync(
                 client=client,
                 rate_limiter=rate_limiter,
                 force_reconcile=reconcile,
+                force_fetch=force,
                 latest_gas_day_override=override,
             )
         except OrchestratorError as exc:
@@ -116,6 +118,7 @@ def refresh_recent_cmd(
 def reconcile_cmd(
     start_value: str | None = typer.Option(None, "--start"),
     end_value: str | None = typer.Option(None, "--end"),
+    force: bool = typer.Option(False, "--force", help="Re-fetch all days regardless of recent snapshots"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
     latest_gas_day_value: str | None = typer.Option(None, "--latest-gas-day"),
 ) -> None:
@@ -142,6 +145,8 @@ def reconcile_cmd(
             client=client,
             storage=settings.storage_context(),
             rate_limiter=rate_limiter,
+            force=force,
+            resume_days=policy.reconciliation_resume_days,
         )
     if not result.ok:
         logger.error("Failed dates: %s", result.failed_dates)

@@ -132,6 +132,18 @@ def _parse_raw_key(key: str) -> tuple[int, date, datetime]:
     )
 
 
+def latest_observed_at_by_gas_day(
+    storage: StorageContext, request_version: int
+) -> dict[date, datetime]:
+    latest: dict[date, datetime] = {}
+    for key in _iter_raw_snapshots(storage, request_version):
+        _, gas_day, observed_at = _parse_raw_key(key)
+        existing = latest.get(gas_day)
+        if existing is None or observed_at > existing:
+            latest[gas_day] = observed_at
+    return latest
+
+
 def build_history(storage: StorageContext, request_version: int) -> None:
     partition_rows: dict[str, list[CountryRow]] = defaultdict(list)
 

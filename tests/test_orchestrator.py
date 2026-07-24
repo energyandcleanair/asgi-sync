@@ -99,6 +99,7 @@ def test_orchestrator_updates_state_only_after_success(storage, daily_payload: d
         history_start_date=date(2026, 7, 21),
         recent_days=1,
         reconciliation_interval_days=31,
+        reconciliation_resume_days=3,
     )
     client = AgsiClient(base_url="https://agsi.gie.eu", api_key="key")
     with patch("agsi_pipeline.orchestrator.datetime") as mock_dt:
@@ -131,6 +132,7 @@ def test_orchestrator_failure_leaves_state_unchanged(storage, daily_payload: dic
         history_start_date=date(2026, 7, 21),
         recent_days=1,
         reconciliation_interval_days=31,
+        reconciliation_resume_days=3,
     )
     client = AgsiClient(base_url="https://agsi.gie.eu", api_key="key")
     with pytest.raises(OrchestratorError):

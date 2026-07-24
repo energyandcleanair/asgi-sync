@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
 
 from agsi_pipeline.client import AgsiClient
+from agsi_pipeline.datasets import latest_observed_at_by_gas_day
 from agsi_pipeline.models import InvalidResponseError
 from agsi_pipeline.parsing import walk_hierarchy
 from agsi_pipeline.paths import raw_response_path
 from agsi_pipeline.storage import StorageContext, atomic_write_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def validate_response(payload: dict[str, Any], *, gas_day: date) -> None:
@@ -119,10 +123,32 @@ def fetch_and_store_day(
 @dataclass
 class FetchBatchResult:
     failed_dates: list[date]
+    skipped_dates: list[date] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not self.failed_dates
+
+
+def should_skip_gas_day(
+    latest_observed_at: datetime | None,
+    *,
+    now: datetime,
+    resume_days: int,
+    force: bool,
+) -> bool:
+    if force:
+        return False
+    if latest_observed_at is None:
+        return False
+    observed = (
+        latest_observed_at.replace(tzinfo=UTC)
+        if latest_observed_at.tzinfo is None
+        else latest_observed_at.astimezone(UTC)
+    )
+    now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+    age_days = (now_utc.date() - observed.date()).days
+    return age_days < resume_days
 
 
 def refresh_recent(
@@ -134,6 +160,8 @@ def refresh_recent(
     client: AgsiClient,
     storage: StorageContext,
     rate_limiter: RateLimiter,
+    force: bool = False,
+    resume_days: int = 3,
 ) -> FetchBatchResult:
     from datetime import timedelta
 
@@ -146,6 +174,8 @@ def refresh_recent(
         client=client,
         storage=storage,
         rate_limiter=rate_limiter,
+        force=force,
+        resume_days=resume_days,
     )
 
 
@@ -158,11 +188,28 @@ def reconcile(
     client: AgsiClient,
     storage: StorageContext,
     rate_limiter: RateLimiter,
+    force: bool = False,
+    resume_days: int = 3,
 ) -> FetchBatchResult:
     from agsi_pipeline.dates import iter_gas_days
 
+    now = observed_at
+    latest_by_day = latest_observed_at_by_gas_day(storage, request_version)
     failed: list[date] = []
+    skipped: list[date] = []
+    fetched = 0
     for gas_day in iter_gas_days(start, end):
+        latest_observed = latest_by_day.get(gas_day)
+        if should_skip_gas_day(
+            latest_observed, now=now, resume_days=resume_days, force=force
+        ):
+            skipped.append(gas_day)
+            logger.info(
+                "Skipping %s (fetched %s days ago)",
+                gas_day.isoformat(),
+                (now.date() - latest_observed.date()).days,
+            )
+            continue
         try:
             fetch_and_store_day(
                 gas_day,
@@ -172,6 +219,13 @@ def reconcile(
                 storage=storage,
                 rate_limiter=rate_limiter,
             )
+            fetched += 1
         except InvalidResponseError:
             failed.append(gas_day)
-    return FetchBatchResult(failed_dates=failed)
+    logger.info(
+        "Reconcile: fetched %s, skipped %s, failed %s",
+        fetched,
+        len(skipped),
+        len(failed),
+    )
+    return FetchBatchResult(failed_dates=failed, skipped_dates=skipped)

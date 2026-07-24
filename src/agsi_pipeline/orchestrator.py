@@ -49,6 +49,7 @@ def run_sync(
     client: AgsiClient,
     rate_limiter: RateLimiter,
     force_reconcile: bool = False,
+    force_fetch: bool = False,
     today: date | None = None,
     latest_gas_day_override: date | None = None,
 ) -> OrchestratorResult:
@@ -68,6 +69,8 @@ def run_sync(
             client=client,
             storage=storage,
             rate_limiter=rate_limiter,
+            force=force_fetch,
+            resume_days=policy.reconciliation_resume_days,
         )
     else:
         logger.info("Running recent refresh for %s days ending %s", policy.recent_days, end)
@@ -79,6 +82,8 @@ def run_sync(
             client=client,
             storage=storage,
             rate_limiter=rate_limiter,
+            force=force_fetch,
+            resume_days=policy.reconciliation_resume_days,
         )
 
     if not result.ok:

@@ -74,6 +74,7 @@ Repository-root [`sync-policy.toml`](sync-policy.toml):
 - `history_start_date` — reconciliation start
 - `recent_days` — rolling refresh window
 - `reconciliation_interval_days` — days between full reconciliations
+- `reconciliation_resume_days` — skip re-fetching gas days with a snapshot observed within this many calendar days (job resumption)
 
 ## API authentication
 
@@ -119,6 +120,8 @@ Complete-snapshot semantics: for each gas day, select one `observed_at` (latest,
 - **Full reconciliation** when: no state, request version changed, reconciliation interval elapsed, or `--reconcile`
 - **Recent refresh** otherwise (last `recent_days` gas days)
 
+Reconciliation is **incremental by default**: gas days that already have a raw snapshot observed within `reconciliation_resume_days` are skipped, which makes it easier to resume after a failed run. Use `--force` to re-fetch every day regardless of existing snapshots.
+
 After a successful fetch: `build-history` → `build-current` → `publish-release`. Reconciliation state updates only after a complete successful reconciliation including publish.
 
 ## Scheduling
@@ -134,10 +137,10 @@ The command chooses refresh vs reconciliation automatically.
 ## CLI commands
 
 ```text
-agsi sync [--reconcile]
+agsi sync [--reconcile] [--force]
 agsi fetch-day YYYY-MM-DD [--observed-at ...]
 agsi refresh-recent [--days N]
-agsi reconcile [--start ...] [--end ...]
+agsi reconcile [--start ...] [--end ...] [--force]
 agsi build-history
 agsi build-current
 agsi publish-release
