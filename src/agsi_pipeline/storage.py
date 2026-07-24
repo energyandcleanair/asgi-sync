@@ -77,9 +77,23 @@ def atomic_write_bytes(fs_root: FsRoot, key: str, data: bytes) -> None:
     fs_root.fs.mv(tmp, full)
 
 
+_COPY_CHUNK_SIZE = 1024 * 1024
+
+
 def atomic_copy(src: FsRoot, src_key: str, dst: FsRoot, dst_key: str) -> None:
-    data = read_bytes(src, src_key)
-    atomic_write_bytes(dst, dst_key, data)
+    src_full = src.full_path(src_key)
+    dst_full = dst.full_path(dst_key)
+    parent = str(Path(dst_full).parent)
+    if hasattr(dst.fs, "makedirs"):
+        dst.fs.makedirs(parent, exist_ok=True)
+    tmp = f"{dst_full}.tmp.{uuid.uuid4().hex}"
+    with src.fs.open(src_full, "rb") as reader, dst.fs.open(tmp, "wb") as writer:
+        while True:
+            chunk = reader.read(_COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            writer.write(chunk)
+    dst.fs.mv(tmp, dst_full)
 
 
 def list_files(fs_root: FsRoot, prefix: str) -> list[str]:

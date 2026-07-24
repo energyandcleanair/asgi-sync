@@ -13,7 +13,7 @@ import httpx
 from agsi_pipeline.client import AgsiClient
 from agsi_pipeline.datasets import latest_observed_at_by_gas_day
 from agsi_pipeline.models import InvalidResponseError
-from agsi_pipeline.parsing import walk_hierarchy
+from agsi_pipeline.parsing import collect_snapshot_gas_days
 from agsi_pipeline.paths import raw_response_path
 from agsi_pipeline.storage import StorageContext, atomic_write_bytes
 
@@ -35,16 +35,7 @@ def validate_response(payload: dict[str, Any], *, gas_day: date) -> None:
     if len(data) == 0:
         raise InvalidResponseError("Response data is empty")
 
-    snapshot_starts = {
-        str(record.payload["gasDayStart"])[:10]
-        for record in walk_hierarchy(data)
-        if record.payload.get("gasDayStart") is not None
-    }
-    snapshot_ends = {
-        str(record.payload["gasDayEnd"])[:10]
-        for record in walk_hierarchy(data)
-        if record.payload.get("gasDayEnd") is not None
-    }
+    snapshot_starts, snapshot_ends = collect_snapshot_gas_days(data)
     requested = gas_day.isoformat()
     if requested not in snapshot_starts and requested not in snapshot_ends:
         top_level = str(payload.get("gas_day", ""))[:10]
@@ -53,8 +44,6 @@ def validate_response(payload: dict[str, Any], *, gas_day: date) -> None:
             f"snapshot gasDayStart values {sorted(snapshot_starts)}, "
             f"gasDayEnd values {sorted(snapshot_ends)}, top-level gas_day {top_level!r}"
         )
-
-    walk_hierarchy(data)
 
 
 @dataclass

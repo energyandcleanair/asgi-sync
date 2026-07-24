@@ -4,7 +4,6 @@ import re
 from collections import defaultdict
 from datetime import UTC, date, datetime
 from io import BytesIO
-from typing import Any
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -18,12 +17,12 @@ from agsi_pipeline.paths import (
     silver_history_prefix,
 )
 from agsi_pipeline.storage import (
+    FsRoot,
     StorageContext,
     atomic_copy,
     atomic_write_bytes,
     list_files,
     parse_storage_url,
-    read_bytes,
     read_gzip_json,
 )
 
@@ -97,10 +96,7 @@ def _country_rows_to_frame(rows: list[CountryRow]) -> pl.DataFrame:
     return pl.DataFrame(records)
 
 
-def _write_parquet_atomic(fs_root_key: tuple[Any, str], key: str, frame: pl.DataFrame) -> None:
-    from agsi_pipeline.storage import FsRoot
-
-    fs_root = FsRoot(fs=fs_root_key[0], root=fs_root_key[1])
+def _write_parquet_atomic(fs_root: FsRoot, key: str, frame: pl.DataFrame) -> None:
     table = frame.to_arrow()
     metadata = {b"source": PARQUET_ATTRIBUTION.encode("utf-8")}
     existing = table.schema.metadata or {}
@@ -110,6 +106,66 @@ def _write_parquet_atomic(fs_root_key: tuple[Any, str], key: str, frame: pl.Data
     buffer = BytesIO()
     pq.write_table(table, buffer, compression="zstd")
     atomic_write_bytes(fs_root, key, buffer.getvalue())
+
+
+def _fs_protocol(fs_root: FsRoot) -> str:
+    protocol = fs_root.fs.protocol
+    if isinstance(protocol, tuple):
+        return str(protocol[0])
+    return str(protocol)
+
+
+def _parquet_uri(fs_root: FsRoot, key: str) -> str:
+    full = fs_root.full_path(key)
+    if _fs_protocol(fs_root) == "gcs":
+        return f"gs://{full}"
+    return full
+
+
+def _group_raw_snapshots_by_partition(
+    storage: StorageContext,
+    request_version: int,
+) -> dict[str, list[str]]:
+    keys_by_partition: dict[str, list[str]] = defaultdict(list)
+    for key in _iter_raw_snapshots(storage, request_version):
+        _, _, observed_at = _parse_raw_key(key)
+        partition_key = silver_history_partition_path(request_version, observed_at)
+        keys_by_partition[partition_key].append(key)
+    return keys_by_partition
+
+
+def _remove_orphan_silver_partitions(
+    storage: StorageContext,
+    request_version: int,
+    active_partitions: set[str],
+) -> None:
+    existing_prefix = silver_history_prefix(request_version)
+    for existing in list_files(storage.artifacts, existing_prefix):
+        if existing.endswith(".parquet") and existing not in active_partitions:
+            full = storage.artifacts.full_path(existing)
+            if storage.artifacts.fs.exists(full):
+                storage.artifacts.fs.rm(full)
+
+
+def _build_history_partition(
+    storage: StorageContext,
+    partition_key: str,
+    snapshot_keys: list[str],
+) -> None:
+    rows: list[CountryRow] = []
+    for key in snapshot_keys:
+        rv, gas_day, observed_at = _parse_raw_key(key)
+        snapshot = read_gzip_json(storage.artifacts, key)
+        rows.extend(
+            extract_countries(
+                snapshot,
+                request_version=rv,
+                gas_day=gas_day,
+                observed_at=observed_at,
+            )
+        )
+    frame = _country_rows_to_frame(rows)
+    _write_parquet_atomic(storage.artifacts, partition_key, frame)
 
 
 def _iter_raw_snapshots(storage: StorageContext, request_version: int) -> list[str]:
@@ -145,35 +201,12 @@ def latest_observed_at_by_gas_day(
 
 
 def build_history(storage: StorageContext, request_version: int) -> None:
-    partition_rows: dict[str, list[CountryRow]] = defaultdict(list)
+    keys_by_partition = _group_raw_snapshots_by_partition(storage, request_version)
+    active_partitions = set(keys_by_partition.keys())
+    _remove_orphan_silver_partitions(storage, request_version, active_partitions)
 
-    for key in _iter_raw_snapshots(storage, request_version):
-        rv, gas_day, observed_at = _parse_raw_key(key)
-        snapshot = read_gzip_json(storage.artifacts, key)
-        rows = extract_countries(
-            snapshot,
-            request_version=rv,
-            gas_day=gas_day,
-            observed_at=observed_at,
-        )
-        partition_key = silver_history_partition_path(request_version, observed_at)
-        partition_rows[partition_key].extend(rows)
-
-    # Rebuild each partition from scratch for simplicity.
-    existing_prefix = silver_history_prefix(request_version)
-    for existing in list_files(storage.artifacts, existing_prefix):
-        if existing.endswith(".parquet"):
-            full = storage.artifacts.full_path(existing)
-            if storage.artifacts.fs.exists(full):
-                storage.artifacts.fs.rm(full)
-
-    for partition_key, rows in partition_rows.items():
-        frame = _country_rows_to_frame(rows)
-        _write_parquet_atomic(
-            (storage.artifacts.fs, storage.artifacts.root),
-            partition_key,
-            frame,
-        )
+    for partition_key, snapshot_keys in keys_by_partition.items():
+        _build_history_partition(storage, partition_key, snapshot_keys)
 
 
 def _read_history_frame(storage: StorageContext, request_version: int) -> pl.DataFrame:
@@ -182,11 +215,8 @@ def _read_history_frame(storage: StorageContext, request_version: int) -> pl.Dat
     if not parquet_keys:
         return _country_rows_to_frame([])
 
-    frames: list[pl.DataFrame] = []
-    for key in parquet_keys:
-        raw = read_bytes(storage.artifacts, key)
-        frames.append(pl.read_parquet(BytesIO(raw)))
-    return pl.concat(frames, how="vertical_relaxed")
+    paths = [_parquet_uri(storage.artifacts, key) for key in parquet_keys]
+    return pl.scan_parquet(paths).collect(engine="streaming")
 
 
 def _select_complete_snapshots(frame: pl.DataFrame, as_of: datetime | None = None) -> pl.DataFrame:
@@ -209,7 +239,7 @@ def build_current(storage: StorageContext, request_version: int) -> None:
     history = _read_history_frame(storage, request_version)
     current = _select_complete_snapshots(history)
     key = build_current_path(request_version)
-    _write_parquet_atomic((storage.artifacts.fs, storage.artifacts.root), key, current)
+    _write_parquet_atomic(storage.artifacts, key, current)
 
 
 def publish_release(storage: StorageContext, request_version: int) -> None:
@@ -247,7 +277,7 @@ def build_as_of(
             else:
                 fs_root = parse_storage_url(output)
                 key = "dataset.parquet"
-        _write_parquet_atomic((fs_root.fs, fs_root.root), key, as_of_frame)
+        _write_parquet_atomic(fs_root, key, as_of_frame)
         return
 
     as_of_frame.write_parquet(output, compression="zstd")

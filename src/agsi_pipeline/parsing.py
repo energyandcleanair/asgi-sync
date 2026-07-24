@@ -169,6 +169,43 @@ def _parse_gas_day_field(payload: dict[str, Any], field: str) -> date | None:
         return None
 
 
+def _country_row_from_node(
+    node: dict[str, Any],
+    *,
+    request_version: int,
+    gas_day: date,
+    observed_at: datetime,
+    country_code: str,
+    country_name: str | None,
+    country_url: str | None,
+) -> CountryRow:
+    return CountryRow(
+        request_version=request_version,
+        gas_day=gas_day,
+        observed_at=observed_at,
+        source_updated_at=parse_timestamp(node.get("updatedAt")),
+        country_code=country_code,
+        country_name=country_name,
+        country_url=country_url,
+        gas_day_end=_parse_gas_day_field(node, "gasDayEnd"),
+        gas_in_storage=parse_value(node.get("gasInStorage")),
+        consumption=parse_value(node.get("consumption")),
+        consumption_full=parse_value(node.get("consumptionFull")),
+        injection=parse_value(node.get("injection")),
+        withdrawal=parse_value(node.get("withdrawal")),
+        net_withdrawal=parse_value(node.get("netWithdrawal")),
+        working_gas_volume=parse_value(node.get("workingGasVolume")),
+        injection_capacity=parse_value(node.get("injectionCapacity")),
+        withdrawal_capacity=parse_value(node.get("withdrawalCapacity")),
+        contracted_capacity=parse_value(node.get("contractedCapacity")),
+        available_capacity=parse_value(node.get("availableCapacity")),
+        covered_capacity=parse_value(node.get("coveredCapacity")),
+        status=str(node["status"]) if node.get("status") is not None else None,
+        trend=str(node["trend"]) if node.get("trend") is not None else None,
+        full=parse_value(node.get("full")),
+    )
+
+
 def _country_row_from_record(
     record: ParsedRecord,
     *,
@@ -176,32 +213,83 @@ def _country_row_from_record(
     gas_day: date,
     observed_at: datetime,
 ) -> CountryRow:
-    payload = record.payload
-    return CountryRow(
+    return _country_row_from_node(
+        record.payload,
         request_version=request_version,
         gas_day=gas_day,
         observed_at=observed_at,
-        source_updated_at=parse_timestamp(payload.get("updatedAt")),
         country_code=record.country_code or record.code.upper(),
         country_name=record.name,
         country_url=record.url,
-        gas_day_end=_parse_gas_day_field(payload, "gasDayEnd"),
-        gas_in_storage=parse_value(payload.get("gasInStorage")),
-        consumption=parse_value(payload.get("consumption")),
-        consumption_full=parse_value(payload.get("consumptionFull")),
-        injection=parse_value(payload.get("injection")),
-        withdrawal=parse_value(payload.get("withdrawal")),
-        net_withdrawal=parse_value(payload.get("netWithdrawal")),
-        working_gas_volume=parse_value(payload.get("workingGasVolume")),
-        injection_capacity=parse_value(payload.get("injectionCapacity")),
-        withdrawal_capacity=parse_value(payload.get("withdrawalCapacity")),
-        contracted_capacity=parse_value(payload.get("contractedCapacity")),
-        available_capacity=parse_value(payload.get("availableCapacity")),
-        covered_capacity=parse_value(payload.get("coveredCapacity")),
-        status=str(payload["status"]) if payload.get("status") is not None else None,
-        trend=str(payload["trend"]) if payload.get("trend") is not None else None,
-        full=parse_value(payload.get("full")),
     )
+
+
+def _append_country_rows(
+    nodes: list[dict[str, Any]],
+    rows: list[CountryRow],
+    *,
+    parent_level: HierarchyLevel | None = None,
+    request_version: int,
+    gas_day: date,
+    observed_at: datetime,
+) -> None:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        level = _infer_level(node, parent_level=parent_level)
+        code = str(node.get("code", ""))
+        name = node.get("name")
+        url = node.get("url")
+
+        if level == HierarchyLevel.COUNTRY:
+            rows.append(
+                _country_row_from_node(
+                    node,
+                    request_version=request_version,
+                    gas_day=gas_day,
+                    observed_at=observed_at,
+                    country_code=code.upper(),
+                    country_name=str(name) if name is not None else None,
+                    country_url=str(url) if url is not None else None,
+                )
+            )
+
+        children = node.get("children")
+        if isinstance(children, list) and children:
+            _append_country_rows(
+                children,
+                rows,
+                parent_level=level,
+                request_version=request_version,
+                gas_day=gas_day,
+                observed_at=observed_at,
+            )
+
+
+def collect_snapshot_gas_days(
+    nodes: list[dict[str, Any]],
+    *,
+    parent_level: HierarchyLevel | None = None,
+) -> tuple[set[str], set[str]]:
+    starts: set[str] = set()
+    ends: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        level = _infer_level(node, parent_level=parent_level)
+        if node.get("gasDayStart") is not None:
+            starts.add(str(node["gasDayStart"])[:10])
+        if node.get("gasDayEnd") is not None:
+            ends.add(str(node["gasDayEnd"])[:10])
+        children = node.get("children")
+        if isinstance(children, list) and children:
+            child_starts, child_ends = collect_snapshot_gas_days(
+                children,
+                parent_level=level,
+            )
+            starts.update(child_starts)
+            ends.update(child_ends)
+    return starts, ends
 
 
 def extract_countries(
@@ -215,17 +303,14 @@ def extract_countries(
     if not isinstance(data, list):
         raise ValueError("snapshot data must be a list")
 
-    records = walk_hierarchy(data)
-    countries = [r for r in records if r.level == HierarchyLevel.COUNTRY]
-    rows = [
-        _country_row_from_record(
-            record,
-            request_version=request_version,
-            gas_day=gas_day,
-            observed_at=observed_at,
-        )
-        for record in countries
-    ]
+    rows: list[CountryRow] = []
+    _append_country_rows(
+        data,
+        rows,
+        request_version=request_version,
+        gas_day=gas_day,
+        observed_at=observed_at,
+    )
 
     seen: set[tuple[int, date, datetime, str]] = set()
     for row in rows:

@@ -9,6 +9,7 @@ import pytest
 from agsi_pipeline.models import DuplicateKeyError
 from agsi_pipeline.parsing import (
     HierarchyLevel,
+    collect_snapshot_gas_days,
     extract_countries,
     parse_value,
     walk_hierarchy,
@@ -51,6 +52,11 @@ def test_extract_countries(daily_payload: dict) -> None:
 def test_parse_value_unavailable() -> None:
     assert parse_value("-") is None
     assert parse_value("12.5") == 12.5
+
+
+def test_collect_snapshot_gas_days(daily_payload: dict) -> None:
+    starts, ends = collect_snapshot_gas_days(daily_payload["data"])
+    assert "2026-07-21" in starts or "2026-07-21" in ends
 
 
 def test_duplicate_country_key_raises(daily_payload: dict) -> None:
