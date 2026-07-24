@@ -1,0 +1,17 @@
+# Shared defaults for scripts/infra/provision. Override via env or CLI flags.
+
+: "${GCP_PROJECT:=crea-aq-data}"
+: "${GCP_PROJECT_NUMBER:=829505003332}"
+: "${GCP_REGION:=europe-west1}"
+: "${IMAGE_NAME:=europe-docker.pkg.dev/crea-aq-data/creaengine/agsi-pipeline}"
+: "${IMAGE_TAG:=latest}"
+: "${PIPELINE_SA_ID:=agsi-pipeline}"
+: "${ARTIFACTS_BUCKET:=crea-aq-data-agsi-artifacts}"
+: "${PUBLIC_BUCKET:=crea-aq-data-agsi-public}"
+: "${API_KEY_SECRET:=AGSI_API_KEY}"
+: "${RUN_JOB_NAME:=agsi-pipeline-sync}"
+: "${SCHEDULER_JOB_NAME:=agsi-pipeline-daily}"
+: "${SCHEDULE:=0 6 * * *}"
+
+PIPELINE_SA="${PIPELINE_SA_ID}@${GCP_PROJECT}.iam.gserviceaccount.com"
+COMPUTE_SA="${GCP_PROJECT_NUMBER}-compute@developer.gserviceaccount.com"

@@ -17,6 +17,16 @@ COPY sync-policy.toml README.md ./
 
 RUN poetry install --only main --no-root && poetry install --only-root
 
+FROM builder AS test
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+RUN poetry install --no-root && poetry install --only-root
+COPY tests ./tests
+
+WORKDIR /app
+CMD ["pytest", "-q", "-o", "addopts=-q"]
+
 FROM python:3.12.8-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DRY_RUN=0
+
+log() {
+  printf '==> %s\n' "$*"
+}
+
+run() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '[dry-run] %s\n' "$*"
+    return 0
+  fi
+  "$@"
+}
+
+storage_binding_present() {
+  local bucket="$1"
+  local role="$2"
+  local member="$3"
+
+  gcloud storage buckets get-iam-policy "gs://${bucket}" \
+    --project="$GCP_PROJECT" \
+    --flatten="bindings[].members" \
+    --filter="bindings.role:$role AND bindings.members:$member" \
+    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
+}
+
+secret_binding_present() {
+  local secret="$1"
+  local role="$2"
+  local member="$3"
+
+  gcloud secrets get-iam-policy "$secret" \
+    --project="$GCP_PROJECT" \
+    --flatten="bindings[].members" \
+    --filter="bindings.role:$role AND bindings.members:$member" \
+    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
+}
+
+run_job_binding_present() {
+  local job="$1"
+  local role="$2"
+  local member="$3"
+
+  gcloud run jobs get-iam-policy "$job" \
+    --region="$GCP_REGION" \
+    --project="$GCP_PROJECT" \
+    --flatten="bindings[].members" \
+    --filter="bindings.role:$role AND bindings.members:$member" \
+    --format="value(bindings.role)" 2>/dev/null | grep -qx "$role"
+}
+
+add_storage_binding_if_missing() {
+  local bucket="$1"
+  local role="$2"
+  local member="$3"
+
+  if storage_binding_present "$bucket" "$role" "$member"; then
+    log "IAM binding already present: $member -> $role on gs://$bucket"
+    return 0
+  fi
+
+  log "Granting $member -> $role on gs://$bucket"
+  run gcloud storage buckets add-iam-policy-binding "gs://${bucket}" \
+    --member="$member" \
+    --role="$role" \
+    --quiet
+}
+
+add_secret_binding_if_missing() {
+  local secret="$1"
+  local role="$2"
+  local member="$3"
+
+  if secret_binding_present "$secret" "$role" "$member"; then
+    log "IAM binding already present: $member -> $role on secret $secret"
+    return 0
+  fi
+
+  log "Granting $member -> $role on secret $secret"
+  run gcloud secrets add-iam-policy-binding "$secret" \
+    --member="$member" \
+    --role="$role" \
+    --quiet
+}
+
+add_run_job_binding_if_missing() {
+  local job="$1"
+  local role="$2"
+  local member="$3"
+
+  if run_job_binding_present "$job" "$role" "$member"; then
+    log "IAM binding already present: $member -> $role on job $job"
+    return 0
+  fi
+
+  log "Granting $member -> $role on job $job"
+  run gcloud run jobs add-iam-policy-binding "$job" \
+    --region="$GCP_REGION" \
+    --member="$member" \
+    --role="$role" \
+    --quiet
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project)
+        GCP_PROJECT="$2"
+        PIPELINE_SA="${PIPELINE_SA_ID}@${GCP_PROJECT}.iam.gserviceaccount.com"
+        shift 2
+        ;;
+      --region)
+        GCP_REGION="$2"
+        shift 2
+        ;;
+      --dry-run)
+        DRY_RUN=1
+        shift
+        ;;
+      -h | --help)
+        cat <<EOF
+Usage: provision [--project PROJECT] [--region REGION] [--dry-run]
+
+Provision AGSI pipeline runtime infrastructure in GCP.
+EOF
+        exit 0
+        ;;
+      *)
+        echo "unknown argument: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+}

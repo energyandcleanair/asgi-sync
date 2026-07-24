@@ -40,7 +40,7 @@ def _env_storage(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
-    if request.node.get_closest_marker("integration") or request.node.get_closest_marker("record"):
+    if request.node.get_closest_marker("integration"):
         return
     monkeypatch.setenv("AGSI_ARTIFACTS_STORAGE_URL", storage_dirs[0])
     monkeypatch.setenv("AGSI_PUBLIC_STORAGE_URL", storage_dirs[1])

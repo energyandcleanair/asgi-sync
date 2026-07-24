@@ -150,14 +150,3 @@ Published Parquet files include metadata: `Source: GIE AGSI Transparency Platfor
 
 When republishing data, credit **GIE (Gas Infrastructure Europe), AGSI** as the source.
 
-## Assumptions and unresolved API questions
-
-1. `updatedAt` may be absent on some nodes; stored as null when missing.
-2. `gas_day_end` maps from `gasDayEnd` when present.
-3. Capacity fields (`contracted_capacity`, etc.) are nullable.
-4. Invalid API keys may return HTTP 200 with unusable payloads.
-5. Empty `data[]` is treated as invalid (retry-worthy).
-6. Latest gas day defaults to yesterday UTC; data typically lags 1–2 days.
-7. Rate limit is 60 requests/minute; HTTP 429 triggers a 60s cooldown.
-8. Hierarchy levels inferred from tree depth and code patterns.
-9. GCS buckets are pre-provisioned with appropriate IAM.

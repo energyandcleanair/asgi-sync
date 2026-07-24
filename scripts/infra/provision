@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config
+source "${SCRIPT_DIR}/config"
+# shellcheck source=lib
+source "${SCRIPT_DIR}/lib"
+
+ensure_pipeline_sa() {
+  log "Ensuring pipeline service account ${PIPELINE_SA}"
+  if gcloud iam service-accounts describe "$PIPELINE_SA" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+    log "Service account already exists: ${PIPELINE_SA}"
+    return 0
+  fi
+
+  run gcloud iam service-accounts create "$PIPELINE_SA_ID" \
+    --project="$GCP_PROJECT" \
+    --display-name="AGSI Pipeline"
+}
+
+ensure_bucket() {
+  local bucket="$1"
+  if gcloud storage buckets describe "gs://${bucket}" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+    log "Bucket already exists: gs://${bucket}"
+    return 0
+  fi
+
+  log "Creating bucket gs://${bucket}"
+  run gcloud storage buckets create "gs://${bucket}" \
+    --project="$GCP_PROJECT" \
+    --location="$GCP_REGION" \
+    --uniform-bucket-level-access
+}
+
+ensure_buckets() {
+  ensure_bucket "$ARTIFACTS_BUCKET"
+  ensure_bucket "$PUBLIC_BUCKET"
+}
+
+ensure_bucket_iam() {
+  local member
+  for member in "serviceAccount:${PIPELINE_SA}" "serviceAccount:${COMPUTE_SA}"; do
+    add_storage_binding_if_missing "$ARTIFACTS_BUCKET" "roles/storage.objectAdmin" "$member"
+    add_storage_binding_if_missing "$PUBLIC_BUCKET" "roles/storage.objectAdmin" "$member"
+  done
+}
+
+ensure_public_bucket_access() {
+  add_storage_binding_if_missing "$PUBLIC_BUCKET" "roles/storage.objectViewer" "allUsers"
+}
+
+ensure_api_key_secret_access() {
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "[dry-run] Would grant ${COMPUTE_SA} secretAccessor on ${API_KEY_SECRET}"
+    return 0
+  fi
+
+  if ! gcloud secrets describe "$API_KEY_SECRET" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+    echo "secret ${API_KEY_SECRET} does not exist in project ${GCP_PROJECT}" >&2
+    exit 1
+  fi
+
+  add_secret_binding_if_missing "$API_KEY_SECRET" "roles/secretmanager.secretAccessor" \
+    "serviceAccount:${COMPUTE_SA}"
+}
+
+run_job_image() {
+  printf '%s:%s' "$IMAGE_NAME" "$IMAGE_TAG"
+}
+
+ensure_run_job() {
+  local image
+  image="$(run_job_image)"
+  local artifacts_url="gs://${ARTIFACTS_BUCKET}"
+  local public_url="gs://${PUBLIC_BUCKET}"
+
+  if gcloud run jobs describe "$RUN_JOB_NAME" --region="$GCP_REGION" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+    log "Updating Cloud Run job ${RUN_JOB_NAME}"
+    run gcloud run jobs update "$RUN_JOB_NAME" \
+      --project="$GCP_PROJECT" \
+      --region="$GCP_REGION" \
+      --image="$image" \
+      --service-account="$COMPUTE_SA" \
+      --set-env-vars="AGSI_ARTIFACTS_STORAGE_URL=${artifacts_url},AGSI_PUBLIC_STORAGE_URL=${public_url}" \
+      --set-secrets="AGSI_API_KEY=${API_KEY_SECRET}:latest" \
+      --command="agsi" \
+      --args="sync" \
+      --quiet
+    return 0
+  fi
+
+  log "Creating Cloud Run job ${RUN_JOB_NAME}"
+  run gcloud run jobs create "$RUN_JOB_NAME" \
+    --project="$GCP_PROJECT" \
+    --region="$GCP_REGION" \
+    --image="$image" \
+    --service-account="$COMPUTE_SA" \
+    --set-env-vars="AGSI_ARTIFACTS_STORAGE_URL=${artifacts_url},AGSI_PUBLIC_STORAGE_URL=${public_url}" \
+    --set-secrets="AGSI_API_KEY=${API_KEY_SECRET}:latest" \
+    --command="agsi" \
+    --args="sync" \
+    --quiet
+}
+
+scheduler_run_uri() {
+  printf 'https://%s-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/%s/jobs/%s:run' \
+    "$GCP_REGION" "$GCP_PROJECT" "$RUN_JOB_NAME"
+}
+
+ensure_scheduler() {
+  add_run_job_binding_if_missing "$RUN_JOB_NAME" "roles/run.invoker" "serviceAccount:${COMPUTE_SA}"
+
+  local uri
+  uri="$(scheduler_run_uri)"
+
+  if gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$GCP_PROJECT" >/dev/null 2>&1; then
+    log "Updating Cloud Scheduler job ${SCHEDULER_JOB_NAME}"
+    run gcloud scheduler jobs update http "$SCHEDULER_JOB_NAME" \
+      --project="$GCP_PROJECT" \
+      --location="$GCP_REGION" \
+      --schedule="$SCHEDULE" \
+      --time-zone="UTC" \
+      --uri="$uri" \
+      --http-method=POST \
+      --oauth-service-account-email="$COMPUTE_SA" \
+      --quiet
+    return 0
+  fi
+
+  log "Creating Cloud Scheduler job ${SCHEDULER_JOB_NAME}"
+  run gcloud scheduler jobs create http "$SCHEDULER_JOB_NAME" \
+    --project="$GCP_PROJECT" \
+    --location="$GCP_REGION" \
+    --schedule="$SCHEDULE" \
+    --time-zone="UTC" \
+    --uri="$uri" \
+    --http-method=POST \
+    --oauth-service-account-email="$COMPUTE_SA" \
+    --quiet
+}
+
+main() {
+  parse_args "$@"
+  ensure_pipeline_sa
+  ensure_buckets
+  ensure_bucket_iam
+  ensure_public_bucket_access
+  ensure_api_key_secret_access
+  ensure_run_job
+  ensure_scheduler
+  log "Provision complete"
+}
+
+main "$@"

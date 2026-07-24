@@ -66,6 +66,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "integration: offline pipeline test replaying vcr cassettes",
-    "record: live API recording — never run in CI",
 ]
-addopts = "-q -m 'not integration and not record'"
+addopts = "-q -m 'not integration'"
