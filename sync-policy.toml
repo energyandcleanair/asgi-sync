@@ -1,0 +1,4 @@
+request_version = 1
+history_start_date = "2011-01-01"
+recent_days = 30
+reconciliation_interval_days = 31

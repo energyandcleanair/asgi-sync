@@ -1,0 +1,71 @@
+[tool.poetry]
+name = "agsi-pipeline"
+version = "0.1.0"
+description = "Dockerised ELT pipeline for GIE AGSI gas-storage data"
+authors = []
+readme = "README.md"
+packages = [{ include = "agsi_pipeline", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+httpx = ">=0.27,<1"
+fsspec = ">=2024.6,<2026"
+gcsfs = ">=2024.6,<2026"
+pydantic-settings = ">=2.3,<3"
+polars = ">=1.5,<2"
+pyarrow = ">=17,<21"
+typer = ">=0.12,<1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8,<9"
+respx = ">=0.21,<1"
+ruff = ">=0.6,<1"
+mypy = ">=1.11,<2"
+freezegun = ">=1.5,<2"
+pytest-recording = ">=0.13,<1"
+
+[tool.poetry.scripts]
+agsi = "agsi_pipeline.cli:app"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["agsi_pipeline"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["gcsfs.*", "fsspec.*", "pyarrow.*", "vcr.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+extraPaths = ["src", "tests"]
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: offline pipeline test replaying vcr cassettes",
+    "record: live API recording — never run in CI",
+]
+addopts = "-q -m 'not integration and not record'"

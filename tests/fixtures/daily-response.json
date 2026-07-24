@@ -1,0 +1,107 @@
+{
+  "last_page": 1,
+  "total": 3,
+  "dataset": "EU",
+  "gas_day": "2026-07-21",
+  "data": [
+    {
+      "name": "EU",
+      "code": "eu",
+      "url": "eu",
+      "gasDayStart": "2026-07-21",
+      "gasInStorage": "326.9226",
+      "consumption": "4151.8372",
+      "consumptionFull": "7.87",
+      "injection": "238.66",
+      "withdrawal": "2182.49",
+      "netWithdrawal": "1943.83",
+      "workingGasVolume": "1022.7059",
+      "injectionCapacity": "9973.17",
+      "withdrawalCapacity": "17599.82",
+      "status": "C",
+      "trend": "-0.1",
+      "full": "83.45",
+      "updatedAt": "2026-07-22T18:30:00Z",
+      "children": [
+        {
+          "name": "Germany",
+          "code": "DE",
+          "url": "de",
+          "gasDayStart": "2026-07-21",
+          "gasDayEnd": "2026-07-22",
+          "gasInStorage": "180.5",
+          "consumption": "1200.0",
+          "consumptionFull": "5.5",
+          "injection": "100.0",
+          "withdrawal": "900.0",
+          "netWithdrawal": "800.0",
+          "workingGasVolume": "240.0",
+          "injectionCapacity": "5000.0",
+          "withdrawalCapacity": "8000.0",
+          "contractedCapacity": "230.0",
+          "availableCapacity": "59.5",
+          "coveredCapacity": "75.0",
+          "status": "C",
+          "trend": "0.2",
+          "full": "75.2",
+          "updatedAt": "2026-07-22T18:31:00Z",
+          "children": [
+            {
+              "name": "Uniper Energy Storage",
+              "code": "21X000000001160J",
+              "url": "21X000000001160J/DE",
+              "gasDayStart": "2026-07-21",
+              "gasInStorage": "50.0",
+              "full": "70.0",
+              "children": [
+                {
+                  "name": "UGS Bierwang",
+                  "code": "21Z000000000271O",
+                  "url": "21Z000000000271O/DE/21X000000001160J",
+                  "gasDayStart": "2026-07-21",
+                  "gasInStorage": "10.0",
+                  "full": "65.0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "United Kingdom (Pre-Brexit)",
+          "code": "GB",
+          "url": "gb",
+          "gasDayStart": "2026-07-21",
+          "gasInStorage": "-",
+          "consumption": "-",
+          "consumptionFull": "-",
+          "injection": "-",
+          "withdrawal": "-",
+          "netWithdrawal": "-",
+          "workingGasVolume": "-",
+          "injectionCapacity": "-",
+          "withdrawalCapacity": "-",
+          "status": "N",
+          "trend": "-",
+          "full": "-",
+          "updatedAt": "2026-07-22T18:31:00Z"
+        }
+      ]
+    },
+    {
+      "name": "Non-EU",
+      "code": "ne",
+      "url": "ne",
+      "gasDayStart": "2026-07-21",
+      "full": "60.0",
+      "children": []
+    },
+    {
+      "name": "Additional Information",
+      "code": "ai",
+      "url": "ai",
+      "gasDayStart": "2026-07-21",
+      "full": "55.0",
+      "children": []
+    }
+  ]
+}
