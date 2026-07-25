@@ -28,6 +28,32 @@ from agsi_pipeline.storage import (
 
 PARQUET_ATTRIBUTION = "Source: GIE AGSI Transparency Platform"
 
+COUNTRY_FRAME_SCHEMA = {
+    "request_version": pl.Int32,
+    "gas_day": pl.Date,
+    "observed_at": pl.Datetime(time_unit="us", time_zone="UTC"),
+    "source_updated_at": pl.Datetime(time_unit="us", time_zone="UTC"),
+    "country_code": pl.Utf8,
+    "country_name": pl.Utf8,
+    "country_url": pl.Utf8,
+    "gas_day_end": pl.Date,
+    "gas_in_storage": pl.Float64,
+    "consumption": pl.Float64,
+    "consumption_full": pl.Float64,
+    "injection": pl.Float64,
+    "withdrawal": pl.Float64,
+    "net_withdrawal": pl.Float64,
+    "working_gas_volume": pl.Float64,
+    "injection_capacity": pl.Float64,
+    "withdrawal_capacity": pl.Float64,
+    "contracted_capacity": pl.Float64,
+    "available_capacity": pl.Float64,
+    "covered_capacity": pl.Float64,
+    "status": pl.Utf8,
+    "trend": pl.Utf8,
+    "full": pl.Float64,
+}
+
 RAW_PATH_RE = re.compile(
     r"agsi/raw/request_version=(?P<request_version>\d+)/"
     r"date=(?P<gas_day>\d{4}-\d{2}-\d{2})/"
@@ -37,33 +63,7 @@ RAW_PATH_RE = re.compile(
 
 def _country_rows_to_frame(rows: list[CountryRow]) -> pl.DataFrame:
     if not rows:
-        return pl.DataFrame(
-            schema={
-                "request_version": pl.Int32,
-                "gas_day": pl.Date,
-                "observed_at": pl.Datetime(time_unit="us", time_zone="UTC"),
-                "source_updated_at": pl.Datetime(time_unit="us", time_zone="UTC"),
-                "country_code": pl.Utf8,
-                "country_name": pl.Utf8,
-                "country_url": pl.Utf8,
-                "gas_day_end": pl.Date,
-                "gas_in_storage": pl.Float64,
-                "consumption": pl.Float64,
-                "consumption_full": pl.Float64,
-                "injection": pl.Float64,
-                "withdrawal": pl.Float64,
-                "net_withdrawal": pl.Float64,
-                "working_gas_volume": pl.Float64,
-                "injection_capacity": pl.Float64,
-                "withdrawal_capacity": pl.Float64,
-                "contracted_capacity": pl.Float64,
-                "available_capacity": pl.Float64,
-                "covered_capacity": pl.Float64,
-                "status": pl.Utf8,
-                "trend": pl.Utf8,
-                "full": pl.Float64,
-            }
-        )
+        return pl.DataFrame(schema=COUNTRY_FRAME_SCHEMA)
 
     records = [
         {
@@ -93,7 +93,7 @@ def _country_rows_to_frame(rows: list[CountryRow]) -> pl.DataFrame:
         }
         for row in rows
     ]
-    return pl.DataFrame(records)
+    return pl.DataFrame(records, schema=COUNTRY_FRAME_SCHEMA)
 
 
 def _write_parquet_atomic(fs_root: FsRoot, key: str, frame: pl.DataFrame) -> None:

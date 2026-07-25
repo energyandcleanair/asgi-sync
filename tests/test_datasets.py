@@ -9,7 +9,15 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from agsi_pipeline.datasets import build_as_of, build_current, build_history, publish_release
+from agsi_pipeline.datasets import (
+    COUNTRY_FRAME_SCHEMA,
+    _country_rows_to_frame,
+    build_as_of,
+    build_current,
+    build_history,
+    publish_release,
+)
+from agsi_pipeline.parsing import CountryRow
 from agsi_pipeline.paths import (
     build_current_path,
     public_current_path,
@@ -38,6 +46,70 @@ def _store_snapshot(
     body = json.dumps(payload).encode("utf-8")
     atomic_write_bytes(storage.artifacts, key, gzip.compress(body))
     return key
+
+
+def test_country_rows_to_frame_handles_sparse_nulls_beyond_infer_schema_length() -> None:
+    observed_at = datetime(2026, 8, 1, 2, 0, tzinfo=UTC)
+    rows = [
+        CountryRow(
+            request_version=1,
+            gas_day=date(2026, 7, 21),
+            observed_at=observed_at,
+            source_updated_at=None,
+            country_code=f"C{i:02d}",
+            country_name=None,
+            country_url=None,
+            gas_day_end=None,
+            gas_in_storage=None,
+            consumption=None,
+            consumption_full=None,
+            injection=None,
+            withdrawal=None,
+            net_withdrawal=None,
+            working_gas_volume=None,
+            injection_capacity=None,
+            withdrawal_capacity=None,
+            contracted_capacity=None,
+            available_capacity=None,
+            covered_capacity=None,
+            status=None,
+            trend=None,
+            full=None,
+        )
+        for i in range(101)
+    ]
+    rows.append(
+        CountryRow(
+            request_version=1,
+            gas_day=date(2026, 7, 21),
+            observed_at=observed_at,
+            source_updated_at=None,
+            country_code="DE",
+            country_name="Germany",
+            country_url=None,
+            gas_day_end=None,
+            gas_in_storage=None,
+            consumption=None,
+            consumption_full=None,
+            injection=None,
+            withdrawal=None,
+            net_withdrawal=None,
+            working_gas_volume=None,
+            injection_capacity=None,
+            withdrawal_capacity=None,
+            contracted_capacity=None,
+            available_capacity=None,
+            covered_capacity=None,
+            status="C",
+            trend="0.1",
+            full=98.1163,
+        )
+    )
+
+    frame = _country_rows_to_frame(rows)
+
+    assert frame.schema == COUNTRY_FRAME_SCHEMA
+    assert frame.filter(pl.col("country_code") == "DE")["full"][0] == 98.1163
 
 
 def test_build_history_and_current(storage, daily_payload: dict, tmp_path) -> None:
