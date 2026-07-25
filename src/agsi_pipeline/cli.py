@@ -8,14 +8,19 @@ import typer
 
 from agsi_pipeline.client import AgsiClient
 from agsi_pipeline.config import Settings, load_sync_policy
+from agsi_pipeline.logging_config import configure_logging
 from agsi_pipeline.datasets import build_as_of, build_current, build_history, publish_release
 from agsi_pipeline.dates import latest_gas_day, parse_gas_day
 from agsi_pipeline.fetching import RateLimiter, fetch_and_store_day, reconcile, refresh_recent
 from agsi_pipeline.orchestrator import OrchestratorError, run_sync
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+@app.callback()
+def main_callback() -> None:
+    configure_logging(Settings().log_level)
 
 
 def _settings() -> Settings:
@@ -63,6 +68,7 @@ def fetch_day_cmd(
     ),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
 ) -> None:
+    logger.info("Running fetch-day for %s", gas_day_value)
     settings = _settings()
     policy = load_sync_policy(policy_file)
     gas_day = parse_gas_day(gas_day_value)
@@ -91,6 +97,7 @@ def refresh_recent_cmd(
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
     latest_gas_day_value: str | None = typer.Option(None, "--latest-gas-day"),
 ) -> None:
+    logger.info("Running refresh-recent")
     settings = _settings()
     policy = load_sync_policy(policy_file)
     window = days if days is not None else policy.recent_days
@@ -122,6 +129,7 @@ def reconcile_cmd(
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
     latest_gas_day_value: str | None = typer.Option(None, "--latest-gas-day"),
 ) -> None:
+    logger.info("Running reconcile")
     settings = _settings()
     policy = load_sync_policy(policy_file)
     today = datetime.now(UTC).date()
@@ -158,6 +166,7 @@ def build_history_cmd(
     request_version: int | None = typer.Option(None, "--request-version"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
 ) -> None:
+    logger.info("Running build-history")
     settings = _settings()
     policy = load_sync_policy(policy_file)
     version = request_version if request_version is not None else policy.request_version
@@ -169,6 +178,7 @@ def build_current_cmd(
     request_version: int | None = typer.Option(None, "--request-version"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
 ) -> None:
+    logger.info("Running build-current")
     settings = _settings()
     policy = load_sync_policy(policy_file)
     version = request_version if request_version is not None else policy.request_version
@@ -180,6 +190,7 @@ def publish_release_cmd(
     request_version: int | None = typer.Option(None, "--request-version"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
 ) -> None:
+    logger.info("Running publish-release")
     settings = _settings()
     policy = load_sync_policy(policy_file)
     version = request_version if request_version is not None else policy.request_version
@@ -193,6 +204,7 @@ def build_as_of_cmd(
     request_version: int | None = typer.Option(None, "--request-version"),
     policy_file: Path = typer.Option(Path("sync-policy.toml"), "--policy-file"),
 ) -> None:
+    logger.info("Running build-as-of (as_of=%s, output=%s)", as_of_value, output)
     settings = _settings()
     policy = load_sync_policy(policy_file)
     version = request_version if request_version is not None else policy.request_version

@@ -12,6 +12,7 @@ import httpx
 
 from agsi_pipeline.client import AgsiClient
 from agsi_pipeline.datasets import latest_observed_at_by_gas_day
+from agsi_pipeline.logging_config import log_progress
 from agsi_pipeline.models import InvalidResponseError
 from agsi_pipeline.parsing import collect_snapshot_gas_days
 from agsi_pipeline.paths import raw_response_path
@@ -78,6 +79,7 @@ def fetch_and_store_day(
         try:
             status_code, body = client.fetch_day(gas_day)
             if status_code == 429:
+                logger.warning("Rate limited for %s; waiting 60s", gas_day.isoformat())
                 time.sleep(60)
                 continue
             if status_code < 200 or status_code >= 300:
@@ -94,12 +96,29 @@ def fetch_and_store_day(
             validate_response(payload, gas_day=gas_day)
             compressed = gzip.compress(body, mtime=0)
             atomic_write_bytes(storage.artifacts, path, compressed)
+            logger.debug("Stored %s -> %s", gas_day.isoformat(), path)
             return
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             last_error = exc
+            if attempt < max_attempts:
+                logger.warning(
+                    "Fetch attempt %s/%s for %s failed: %s",
+                    attempt,
+                    max_attempts,
+                    gas_day.isoformat(),
+                    exc,
+                )
             time.sleep(min(2**attempt, 30))
         except InvalidResponseError as exc:
             last_error = exc
+            if attempt < max_attempts:
+                logger.warning(
+                    "Fetch attempt %s/%s for %s failed: %s",
+                    attempt,
+                    max_attempts,
+                    gas_day.isoformat(),
+                    exc,
+                )
             if attempt == max_attempts:
                 break
             time.sleep(min(2**attempt, 30))
@@ -187,13 +206,20 @@ def reconcile(
     failed: list[date] = []
     skipped: list[date] = []
     fetched = 0
-    for gas_day in iter_gas_days(start, end):
+    total_days = (end - start).days + 1
+    logger.info(
+        "Processing %s gas days from %s to %s",
+        total_days,
+        start.isoformat(),
+        end.isoformat(),
+    )
+    for index, gas_day in enumerate(iter_gas_days(start, end), start=1):
         latest_observed = latest_by_day.get(gas_day)
         if should_skip_gas_day(
             latest_observed, now=now, resume_days=resume_days, force=force
         ):
             skipped.append(gas_day)
-            logger.info(
+            logger.debug(
                 "Skipping %s (fetched %s days ago)",
                 gas_day.isoformat(),
                 (now.date() - latest_observed.date()).days,
@@ -209,8 +235,21 @@ def reconcile(
                 rate_limiter=rate_limiter,
             )
             fetched += 1
-        except InvalidResponseError:
+        except InvalidResponseError as exc:
+            logger.error("Failed to fetch %s: %s", gas_day.isoformat(), exc)
             failed.append(gas_day)
+        log_progress(
+            logger,
+            index,
+            total_days,
+            50,
+            "Fetch progress: %s/%s (fetched=%s, skipped=%s, failed=%s)",
+            index,
+            total_days,
+            fetched,
+            len(skipped),
+            len(failed),
+        )
     logger.info(
         "Reconcile: fetched %s, skipped %s, failed %s",
         fetched,

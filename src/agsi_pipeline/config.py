@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     artifacts_storage_url: str = "file://./data/artifacts"
     public_storage_url: str = "file://./data/public"
     requests_per_minute: int = Field(default=60, ge=1)
+    log_level: str = "INFO"
 
     def storage_context(self) -> StorageContext:
         return open_storage_context(

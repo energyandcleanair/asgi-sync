@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 import httpx
 
 from agsi_pipeline.models import InvalidResponseError
+
+logger = logging.getLogger(__name__)
 
 
 class AgsiClient:
@@ -33,11 +36,18 @@ class AgsiClient:
 
     def fetch_day(self, gas_day: date) -> tuple[int, bytes]:
         if not self._api_key:
+            logger.error("API key is not configured")
             raise InvalidResponseError("API key is not configured")
         url = f"{self._base_url}/api"
         response = self._client.get(
             url,
             params={"date": gas_day.isoformat()},
             headers={"x-key": self._api_key},
+        )
+        logger.debug(
+            "GET %s date=%s -> HTTP %s",
+            url,
+            gas_day.isoformat(),
+            response.status_code,
         )
         return response.status_code, response.content

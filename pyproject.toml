@@ -23,6 +23,7 @@ ruff = ">=0.6,<1"
 mypy = ">=1.11,<2"
 freezegun = ">=1.5,<2"
 pytest-recording = ">=0.13,<1"
+ipykernel = "^7.3.0"
 
 [tool.poetry.scripts]
 agsi = "agsi_pipeline.cli:app"

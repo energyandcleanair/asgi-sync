@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from agsi_pipeline.client import AgsiClient  # noqa: E402
 from agsi_pipeline.config import Settings  # noqa: E402
+from agsi_pipeline.logging_config import configure_logging  # noqa: E402
 from agsi_pipeline.dates import latest_gas_day  # noqa: E402
 from agsi_pipeline.fetching import RateLimiter, refresh_recent  # noqa: E402
 from agsi_pipeline.storage import open_storage_context  # noqa: E402
@@ -29,8 +30,6 @@ from integration.cassettes import (  # noqa: E402
 REQUEST_COUNT = 10
 RECORD_MODE = "rewrite" if "--rewrite" in sys.argv else "once"
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-logging.getLogger("vcr").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +45,8 @@ def _gas_day_window(end: date) -> list[date]:
 
 def main() -> int:
     settings = Settings()
+    configure_logging(settings.log_level)
+    logging.getLogger("vcr").setLevel(logging.WARNING)
     api_key = settings.api_key_value()
     if not api_key or api_key == PLACEHOLDER_API_KEY:
         logger.error("Configure a real AGSI_API_KEY in .env before recording cassettes")

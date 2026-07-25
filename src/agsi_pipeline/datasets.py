@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from datetime import UTC, date, datetime
@@ -9,6 +10,7 @@ import polars as pl
 import pyarrow.parquet as pq
 
 from agsi_pipeline.parsing import CountryRow, extract_countries
+from agsi_pipeline.logging_config import log_progress
 from agsi_pipeline.paths import (
     build_current_path,
     parse_observed_at,
@@ -27,6 +29,8 @@ from agsi_pipeline.storage import (
     read_bytes,
     read_gzip_json,
 )
+
+logger = logging.getLogger(__name__)
 
 PARQUET_ATTRIBUTION = "Source: GIE AGSI Transparency Platform"
 
@@ -126,20 +130,23 @@ def _remove_orphan_silver_partitions(
     storage: StorageContext,
     request_version: int,
     active_partitions: set[str],
-) -> None:
+) -> int:
+    removed = 0
     existing_prefix = silver_history_prefix(request_version)
     for existing in list_files(storage.artifacts, existing_prefix):
         if existing.endswith(".parquet") and existing not in active_partitions:
             full = storage.artifacts.full_path(existing)
             if storage.artifacts.fs.exists(full):
                 storage.artifacts.fs.rm(full)
+                removed += 1
+    return removed
 
 
 def _build_history_partition(
     storage: StorageContext,
     partition_key: str,
     snapshot_keys: list[str],
-) -> None:
+) -> int:
     rows: list[CountryRow] = []
     for key in snapshot_keys:
         rv, gas_day, observed_at = _parse_raw_key(key)
@@ -154,6 +161,7 @@ def _build_history_partition(
         )
     frame = _country_rows_to_frame(rows)
     _write_parquet_atomic(storage.artifacts, partition_key, frame)
+    return frame.height
 
 
 def _iter_raw_snapshots(storage: StorageContext, request_version: int) -> list[str]:
@@ -189,12 +197,44 @@ def latest_observed_at_by_gas_day(
 
 
 def build_history(storage: StorageContext, request_version: int) -> None:
+    logger.info("Building silver history (request_version=%s)", request_version)
     keys_by_partition = _group_raw_snapshots_by_partition(storage, request_version)
     active_partitions = set(keys_by_partition.keys())
-    _remove_orphan_silver_partitions(storage, request_version, active_partitions)
+    raw_snapshot_count = sum(len(keys) for keys in keys_by_partition.values())
+    logger.info(
+        "Grouped %s raw snapshots into %s silver partitions",
+        raw_snapshot_count,
+        len(active_partitions),
+    )
+    removed = _remove_orphan_silver_partitions(storage, request_version, active_partitions)
+    if removed:
+        logger.info("Removed %s orphan silver partitions", removed)
 
-    for partition_key, snapshot_keys in keys_by_partition.items():
-        _build_history_partition(storage, partition_key, snapshot_keys)
+    partition_items = sorted(keys_by_partition.items())
+    total_partitions = len(partition_items)
+    for index, (partition_key, snapshot_keys) in enumerate(partition_items, start=1):
+        row_count = _build_history_partition(storage, partition_key, snapshot_keys)
+        logger.info(
+            "Built partition %s: %s rows from %s snapshots",
+            partition_key,
+            row_count,
+            len(snapshot_keys),
+        )
+        log_progress(
+            logger,
+            index,
+            total_partitions,
+            10,
+            "History build progress: %s/%s partitions",
+            index,
+            total_partitions,
+        )
+
+    logger.info(
+        "Built %s silver partitions from %s raw snapshots",
+        len(active_partitions),
+        raw_snapshot_count,
+    )
 
 
 def _history_partition_keys(storage: StorageContext, request_version: int) -> list[str]:
@@ -204,17 +244,30 @@ def _history_partition_keys(storage: StorageContext, request_version: int) -> li
 def _read_history_frame(storage: StorageContext, request_version: int) -> pl.DataFrame:
     parquet_keys = _history_partition_keys(storage, request_version)
     if not parquet_keys:
+        logger.info("No history partitions found")
         return _country_rows_to_frame([])
 
+    logger.info("Reading %s history partitions", len(parquet_keys))
     lazy_frames: list[pl.LazyFrame] = []
-    for key in parquet_keys:
+    for index, key in enumerate(parquet_keys, start=1):
         if not exists(storage.artifacts, key):
             raise FileNotFoundError(
                 f"Missing silver history partition {key!r}; run build-history before build-current"
             )
         lazy_frames.append(pl.scan_parquet(BytesIO(read_bytes(storage.artifacts, key))))
+        log_progress(
+            logger,
+            index,
+            len(parquet_keys),
+            10,
+            "History read progress: %s/%s partitions",
+            index,
+            len(parquet_keys),
+        )
 
-    return pl.concat(lazy_frames, how="vertical_relaxed").collect(engine="streaming")
+    frame = pl.concat(lazy_frames, how="vertical_relaxed").collect(engine="streaming")
+    logger.info("Loaded history frame: %s rows", frame.height)
+    return frame
 
 
 def _select_complete_snapshots(frame: pl.DataFrame, as_of: datetime | None = None) -> pl.DataFrame:
@@ -234,16 +287,30 @@ def _select_complete_snapshots(frame: pl.DataFrame, as_of: datetime | None = Non
 
 
 def build_current(storage: StorageContext, request_version: int) -> None:
+    partition_count = len(_history_partition_keys(storage, request_version))
+    logger.info("Building current dataset from %s history partitions", partition_count)
     history = _read_history_frame(storage, request_version)
+    logger.info("Selecting latest complete snapshot per gas day")
     current = _select_complete_snapshots(history)
     key = build_current_path(request_version)
+    logger.info("Writing current dataset to %s", key)
     _write_parquet_atomic(storage.artifacts, key, current)
+    gas_day_count = current.select("gas_day").n_unique() if not current.is_empty() else 0
+    logger.info(
+        "Wrote current dataset: %s rows, %s gas days -> %s",
+        current.height,
+        gas_day_count,
+        key,
+    )
 
 
 def publish_release(storage: StorageContext, request_version: int) -> None:
     src_key = build_current_path(request_version)
     dst_key = public_current_path(request_version)
+    logger.info("Publishing %s -> %s", src_key, dst_key)
+    logger.info("Copying artifact to public bucket")
     atomic_copy(storage.artifacts, src_key, storage.public, dst_key)
+    logger.info("Published release for request_version=%s", request_version)
 
 
 def build_as_of(
@@ -253,8 +320,15 @@ def build_as_of(
     as_of: datetime,
     output: str,
 ) -> None:
+    logger.info(
+        "Building as-of dataset (as_of=%s, output=%s)",
+        as_of.isoformat(),
+        output,
+    )
     history = _read_history_frame(storage, request_version)
+    logger.info("Selecting complete snapshots as of %s", as_of.isoformat())
     as_of_frame = _select_complete_snapshots(history, as_of=as_of)
+    logger.info("As-of dataset has %s rows", as_of_frame.height)
 
     if output.startswith("gs://") or output.startswith("file://"):
         fs_root = parse_storage_url(output)
