@@ -21,8 +21,10 @@ from agsi_pipeline.storage import (
     StorageContext,
     atomic_copy,
     atomic_write_bytes,
+    exists,
     list_files,
     parse_storage_url,
+    read_bytes,
     read_gzip_json,
 )
 
@@ -106,20 +108,6 @@ def _write_parquet_atomic(fs_root: FsRoot, key: str, frame: pl.DataFrame) -> Non
     buffer = BytesIO()
     pq.write_table(table, buffer, compression="zstd")
     atomic_write_bytes(fs_root, key, buffer.getvalue())
-
-
-def _fs_protocol(fs_root: FsRoot) -> str:
-    protocol = fs_root.fs.protocol
-    if isinstance(protocol, tuple):
-        return str(protocol[0])
-    return str(protocol)
-
-
-def _parquet_uri(fs_root: FsRoot, key: str) -> str:
-    full = fs_root.full_path(key)
-    if _fs_protocol(fs_root) == "gcs":
-        return f"gs://{full}"
-    return full
 
 
 def _group_raw_snapshots_by_partition(
@@ -209,14 +197,24 @@ def build_history(storage: StorageContext, request_version: int) -> None:
         _build_history_partition(storage, partition_key, snapshot_keys)
 
 
+def _history_partition_keys(storage: StorageContext, request_version: int) -> list[str]:
+    return sorted(_group_raw_snapshots_by_partition(storage, request_version).keys())
+
+
 def _read_history_frame(storage: StorageContext, request_version: int) -> pl.DataFrame:
-    prefix = silver_history_prefix(request_version)
-    parquet_keys = [k for k in list_files(storage.artifacts, prefix) if k.endswith(".parquet")]
+    parquet_keys = _history_partition_keys(storage, request_version)
     if not parquet_keys:
         return _country_rows_to_frame([])
 
-    paths = [_parquet_uri(storage.artifacts, key) for key in parquet_keys]
-    return pl.scan_parquet(paths).collect(engine="streaming")
+    lazy_frames: list[pl.LazyFrame] = []
+    for key in parquet_keys:
+        if not exists(storage.artifacts, key):
+            raise FileNotFoundError(
+                f"Missing silver history partition {key!r}; run build-history before build-current"
+            )
+        lazy_frames.append(pl.scan_parquet(BytesIO(read_bytes(storage.artifacts, key))))
+
+    return pl.concat(lazy_frames, how="vertical_relaxed").collect(engine="streaming")
 
 
 def _select_complete_snapshots(frame: pl.DataFrame, as_of: datetime | None = None) -> pl.DataFrame:
